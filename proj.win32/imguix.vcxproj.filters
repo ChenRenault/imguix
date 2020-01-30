@@ -27,9 +27,6 @@
     <ClCompile Include="..\Classes\imgui\CCIMGUI.cpp">
       <Filter>src\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="..\Classes\imgui\CCIMGUIGLViewImpl.cpp">
-      <Filter>src\imgui</Filter>
-    </ClCompile>
     <ClCompile Include="..\Classes\imgui\CCImGuiLayer.cpp">
       <Filter>src\imgui</Filter>
     </ClCompile>
@@ -60,9 +57,6 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\Classes\imgui\CCIMGUI.h">
-      <Filter>src\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Classes\imgui\CCIMGUIGLViewImpl.h">
       <Filter>src\imgui</Filter>
     </ClInclude>
     <ClInclude Include="..\Classes\imgui\CCImGuiLayer.h">
