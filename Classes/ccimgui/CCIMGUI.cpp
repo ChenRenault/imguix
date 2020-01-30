@@ -30,8 +30,12 @@ CCIMGUI* CCIMGUI::getInstance()
 void CCIMGUI::init()
 {
     ImGui_ImplCocos2dx_Init(true);
+
+	ImGui_ImplOpenGL2_Init();
+
 #if 1
 	_callPiplines["styleEditor"] = std::bind(&CCIMGUI::displaySetupStyle, this);
+	// When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
 	ImGuiStyle& style = ImGui::GetStyle();
 
 	ImVec4 col_text = ImColor::HSV(hue / 255.f, 20.f / 255.f, 235.f / 255.f);
@@ -80,6 +84,16 @@ void CCIMGUI::init()
 //	style.Colors[ImGuiCol_TooltipBg] = ImVec4(col_main.x, col_main.y, col_main.z, 0.92f);
 	style.Colors[ImGuiCol_ModalWindowDarkening] = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
 #endif
+
+
+
+
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+	{
+		style.WindowRounding = 0.0f;
+		style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+	}
 }
 
 void CCIMGUI::updateImGUI()

@@ -28,6 +28,14 @@
 //#define GLFW_HAS_VULKAN             (GLFW_VERSION_MAJOR * 1000 + GLFW_VERSION_MINOR * 100 >= 3200) // 3.2+ glfwCreateWindowSurface
 #endif // CC_PLATFORM_PC
 
+
+// Data
+enum GlfwClientApi
+{
+    GlfwClientApi_Unknown,
+    GlfwClientApi_OpenGL,
+    GlfwClientApi_Vulkan
+};
 // GLFW data
 enum ClientApi
 {
@@ -39,6 +47,8 @@ static ClientApi            g_ClientApi = ClientApi_Unknown;
 static double               g_Time = 0.0;
 static bool                 g_MouseJustPressed[5] = { false, false, false, false, false };
 static ImVec2               g_CursorPos = ImVec2(-FLT_MAX, -FLT_MAX);
+static bool                 g_InstalledCallbacks = false;
+static bool                 g_WantUpdateMonitors = true;
 
 #ifdef CC_PLATFORM_PC
 static GLFWwindow*          g_Window = nullptr;
@@ -58,6 +68,86 @@ static GLuint       g_ShaderHandle = 0, g_VertHandle = 0, g_FragHandle = 0;
 static int          g_AttribLocationTex = 0, g_AttribLocationProjMtx = 0;                                // Uniforms location
 static int          g_AttribLocationVtxPos = 0, g_AttribLocationVtxUV = 0, g_AttribLocationVtxColor = 0; // Vertex attributes location
 static unsigned int g_VboHandle = 0, g_ElementsHandle = 0;
+
+
+// Forward Declarations
+static void ImGui_ImplGlfw_InitPlatformInterface();
+static void ImGui_ImplGlfw_ShutdownPlatformInterface();
+static void ImGui_ImplGlfw_UpdateMonitors();
+
+static const char* ImGui_ImplGlfw_GetClipboardText(void* user_data)
+{
+    return glfwGetClipboardString((GLFWwindow*)user_data);
+}
+
+static void ImGui_ImplGlfw_SetClipboardText(void* user_data, const char* text)
+{
+    glfwSetClipboardString((GLFWwindow*)user_data, text);
+}
+
+void ImGui_ImplGlfw_MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+{
+    if (g_PrevUserCallbackMousebutton != NULL && window == g_Window)
+        g_PrevUserCallbackMousebutton(window, button, action, mods);
+
+    if (action == GLFW_PRESS && button >= 0 && button < IM_ARRAYSIZE(g_MouseJustPressed))
+        g_MouseJustPressed[button] = true;
+}
+
+void ImGui_ImplGlfw_ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    if (g_PrevUserCallbackScroll != NULL && window == g_Window)
+        g_PrevUserCallbackScroll(window, xoffset, yoffset);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.MouseWheelH += (float)xoffset;
+    io.MouseWheel += (float)yoffset;
+}
+
+void ImGui_ImplGlfw_KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (g_PrevUserCallbackKey != NULL && window == g_Window)
+        g_PrevUserCallbackKey(window, key, scancode, action, mods);
+
+    ImGuiIO& io = ImGui::GetIO();
+    if (action == GLFW_PRESS)
+        io.KeysDown[key] = true;
+    if (action == GLFW_RELEASE)
+        io.KeysDown[key] = false;
+
+    // Modifiers are not reliable across systems
+    io.KeyCtrl = io.KeysDown[GLFW_KEY_LEFT_CONTROL] || io.KeysDown[GLFW_KEY_RIGHT_CONTROL];
+    io.KeyShift = io.KeysDown[GLFW_KEY_LEFT_SHIFT] || io.KeysDown[GLFW_KEY_RIGHT_SHIFT];
+    io.KeyAlt = io.KeysDown[GLFW_KEY_LEFT_ALT] || io.KeysDown[GLFW_KEY_RIGHT_ALT];
+    io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] || io.KeysDown[GLFW_KEY_RIGHT_SUPER];
+}
+
+void ImGui_ImplGlfw_CharCallback(GLFWwindow* window, unsigned int c)
+{
+    if (g_PrevUserCallbackChar != NULL && window == g_Window)
+        g_PrevUserCallbackChar(window, c);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddInputCharacter(c);
+}
+
+
+//--------------------------------------------------------------------------------------------------------
+// MULTI-VIEWPORT / PLATFORM INTERFACE SUPPORT
+// This is an _advanced_ and _optional_ feature, allowing the back-end to create and handle multiple viewports simultaneously.
+// If you are new to dear imgui or creating a new binding for dear imgui, it is recommended that you completely ignore this section first..
+//--------------------------------------------------------------------------------------------------------
+
+struct ImGuiViewportDataGlfw
+{
+    GLFWwindow* Window;
+    bool        WindowOwned;
+    int         IgnoreWindowSizeEventFrame;
+
+    ImGuiViewportDataGlfw() { Window = NULL; WindowOwned = false; IgnoreWindowSizeEventFrame = -1; }
+    ~ImGuiViewportDataGlfw() { IM_ASSERT(Window == NULL); }
+};
+
 
 static void ImGui_ImplCocos2dx_SetupRenderState(ImDrawData* draw_data, int fb_width, int fb_height, GLuint vertex_array_object)
 {
@@ -244,6 +334,131 @@ void    ImGui_ImplCocos2dx_RenderDrawData(ImDrawData* draw_data)
     glScissor(last_scissor_box[0], last_scissor_box[1], (GLsizei)last_scissor_box[2], (GLsizei)last_scissor_box[3]);
 }
 
+
+
+static void ImGui_ImplOpenGL2_SetupRenderState(ImDrawData* draw_data, int fb_width, int fb_height)
+{
+    // Setup render state: alpha-blending enabled, no face culling, no depth testing, scissor enabled, vertex/texcoord/color pointers, polygon fill.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_COLOR_MATERIAL);
+    glEnable(GL_SCISSOR_TEST);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glEnable(GL_TEXTURE_2D);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+    // If you are using this code with non-legacy OpenGL header/contexts (which you should not, prefer using imgui_impl_opengl3.cpp!!),
+    // you may need to backup/reset/restore current shader using the lines below. DO NOT MODIFY THIS FILE! Add the code in your calling function:
+    //  GLint last_program;
+    //  glGetIntegerv(GL_CURRENT_PROGRAM, &last_program);
+    //  glUseProgram(0);
+    //  ImGui_ImplOpenGL2_RenderDrawData(...);
+    //  glUseProgram(last_program)
+
+    // Setup viewport, orthographic projection matrix
+    // Our visible imgui space lies from draw_data->DisplayPos (top left) to draw_data->DisplayPos+data_data->DisplaySize (bottom right). DisplayPos is (0,0) for single viewport apps.
+    glViewport(0, 0, (GLsizei)fb_width, (GLsizei)fb_height);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(draw_data->DisplayPos.x, draw_data->DisplayPos.x + draw_data->DisplaySize.x, draw_data->DisplayPos.y + draw_data->DisplaySize.y, draw_data->DisplayPos.y, -1.0f, +1.0f);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+}
+
+// OpenGL2 Render function.
+// (this used to be set in io.RenderDrawListsFn and called by ImGui::Render(), but you can now call this directly from your main loop)
+// Note that this implementation is little overcomplicated because we are saving/setting up/restoring every OpenGL state explicitly, in order to be able to run within any OpenGL engine that doesn't do so.
+void ImGui_ImplOpenGL2_RenderDrawData(ImDrawData* draw_data)
+{
+    // Avoid rendering when minimized, scale coordinates for retina displays (screen coordinates != framebuffer coordinates)
+    int fb_width = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
+    int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
+    if (fb_width == 0 || fb_height == 0)
+        return;
+
+    // Backup GL state
+    GLint last_texture; glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+    GLint last_polygon_mode[2]; glGetIntegerv(GL_POLYGON_MODE, last_polygon_mode);
+    GLint last_viewport[4]; glGetIntegerv(GL_VIEWPORT, last_viewport);
+    GLint last_scissor_box[4]; glGetIntegerv(GL_SCISSOR_BOX, last_scissor_box);
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_TRANSFORM_BIT);
+
+    // Setup desired GL state
+    ImGui_ImplOpenGL2_SetupRenderState(draw_data, fb_width, fb_height);
+
+    // Will project scissor/clipping rectangles into framebuffer space
+    ImVec2 clip_off = draw_data->DisplayPos;         // (0,0) unless using multi-viewports
+    ImVec2 clip_scale = draw_data->FramebufferScale; // (1,1) unless using retina display which are often (2,2)
+
+    // Render command lists
+    for (int n = 0; n < draw_data->CmdListsCount; n++)
+    {
+        const ImDrawList* cmd_list = draw_data->CmdLists[n];
+        const ImDrawVert* vtx_buffer = cmd_list->VtxBuffer.Data;
+        const ImDrawIdx* idx_buffer = cmd_list->IdxBuffer.Data;
+        glVertexPointer(2, GL_FLOAT, sizeof(ImDrawVert), (const GLvoid*)((const char*)vtx_buffer + IM_OFFSETOF(ImDrawVert, pos)));
+        glTexCoordPointer(2, GL_FLOAT, sizeof(ImDrawVert), (const GLvoid*)((const char*)vtx_buffer + IM_OFFSETOF(ImDrawVert, uv)));
+        glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(ImDrawVert), (const GLvoid*)((const char*)vtx_buffer + IM_OFFSETOF(ImDrawVert, col)));
+
+        for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; cmd_i++)
+        {
+            const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
+            if (pcmd->UserCallback)
+            {
+                // User callback, registered via ImDrawList::AddCallback()
+                // (ImDrawCallback_ResetRenderState is a special callback value used by the user to request the renderer to reset render state.)
+                if (pcmd->UserCallback == ImDrawCallback_ResetRenderState)
+                    ImGui_ImplOpenGL2_SetupRenderState(draw_data, fb_width, fb_height);
+                else
+                    pcmd->UserCallback(cmd_list, pcmd);
+            }
+            else
+            {
+                // Project scissor/clipping rectangles into framebuffer space
+                ImVec4 clip_rect;
+                clip_rect.x = (pcmd->ClipRect.x - clip_off.x) * clip_scale.x;
+                clip_rect.y = (pcmd->ClipRect.y - clip_off.y) * clip_scale.y;
+                clip_rect.z = (pcmd->ClipRect.z - clip_off.x) * clip_scale.x;
+                clip_rect.w = (pcmd->ClipRect.w - clip_off.y) * clip_scale.y;
+
+                if (clip_rect.x < fb_width && clip_rect.y < fb_height && clip_rect.z >= 0.0f && clip_rect.w >= 0.0f)
+                {
+                    // Apply scissor/clipping rectangle
+                    glScissor((int)clip_rect.x, (int)(fb_height - clip_rect.w), (int)(clip_rect.z - clip_rect.x), (int)(clip_rect.w - clip_rect.y));
+
+                    // Bind texture, Draw
+                    glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t)pcmd->TextureId);
+                    glDrawElements(GL_TRIANGLES, (GLsizei)pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, idx_buffer);
+                }
+            }
+            idx_buffer += pcmd->ElemCount;
+        }
+    }
+
+    // Restore modified GL state
+    glDisableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)last_texture);
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glPopAttrib();
+    glPolygonMode(GL_FRONT, (GLenum)last_polygon_mode[0]); glPolygonMode(GL_BACK, (GLenum)last_polygon_mode[1]);
+    glViewport(last_viewport[0], last_viewport[1], (GLsizei)last_viewport[2], (GLsizei)last_viewport[3]);
+    glScissor(last_scissor_box[0], last_scissor_box[1], (GLsizei)last_scissor_box[2], (GLsizei)last_scissor_box[3]);
+}
+
+
+
 static const char* ImGui_ImplCocos2dx_GetClipboardText(void* user_data)
 {
 #ifdef CC_PLATFORM_PC
@@ -355,6 +570,140 @@ void ImGui_ImplCocos2dx_DestroyFontsTexture()
         g_FontTexture = 0;
     }
 }
+
+
+static void ImGui_ImplGlfw_ShowWindow(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+
+#if defined(_WIN32)
+    // GLFW hack: Hide icon from task bar
+    HWND hwnd = (HWND)viewport->PlatformHandleRaw;
+    if (viewport->Flags & ImGuiViewportFlags_NoTaskBarIcon)
+    {
+        LONG ex_style = ::GetWindowLong(hwnd, GWL_EXSTYLE);
+        ex_style &= ~WS_EX_APPWINDOW;
+        ex_style |= WS_EX_TOOLWINDOW;
+        ::SetWindowLong(hwnd, GWL_EXSTYLE, ex_style);
+    }
+
+    // GLFW hack: install hook for WM_NCHITTEST message handler
+#if GLFW_HAS_GLFW_HOVERED && defined(_WIN32)
+    ::SetPropA(hwnd, "IMGUI_VIEWPORT", viewport);
+    if (g_GlfwWndProc == NULL)
+        g_GlfwWndProc = (WNDPROC)::GetWindowLongPtr(hwnd, GWLP_WNDPROC);
+    ::SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)WndProcNoInputs);
+#endif
+
+#if !GLFW_HAS_FOCUS_ON_SHOW
+    // GLFW hack: GLFW 3.2 has a bug where glfwShowWindow() also activates/focus the window.
+    // The fix was pushed to GLFW repository on 2018/01/09 and should be included in GLFW 3.3 via a GLFW_FOCUS_ON_SHOW window attribute.
+    // See https://github.com/glfw/glfw/issues/1189
+    // FIXME-VIEWPORT: Implement same work-around for Linux/OSX in the meanwhile.
+    if (viewport->Flags & ImGuiViewportFlags_NoFocusOnAppearing)
+    {
+        ::ShowWindow(hwnd, SW_SHOWNA);
+        return;
+    }
+#endif
+#endif
+
+    glfwShowWindow(data->Window);
+}
+
+static ImVec2 ImGui_ImplGlfw_GetWindowPos(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    int x = 0, y = 0;
+    glfwGetWindowPos(data->Window, &x, &y);
+    return ImVec2((float)x, (float)y);
+}
+
+static void ImGui_ImplGlfw_SetWindowPos(ImGuiViewport* viewport, ImVec2 pos)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    glfwSetWindowPos(data->Window, (int)pos.x, (int)pos.y);
+}
+
+static ImVec2 ImGui_ImplGlfw_GetWindowSize(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    int w = 0, h = 0;
+    glfwGetWindowSize(data->Window, &w, &h);
+    return ImVec2((float)w, (float)h);
+}
+
+static void ImGui_ImplGlfw_SetWindowSize(ImGuiViewport* viewport, ImVec2 size)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+#if __APPLE__
+    // Native OS windows are positioned from the bottom-left corner on macOS, whereas on other platforms they are
+    // positioned from the upper-left corner. GLFW makes an effort to convert macOS style coordinates, however it
+    // doesn't handle it when changing size. We are manually moving the window in order for changes of size to be based
+    // on the upper-left corner.
+    int x, y, width, height;
+    glfwGetWindowPos(data->Window, &x, &y);
+    glfwGetWindowSize(data->Window, &width, &height);
+    glfwSetWindowPos(data->Window, x, y - height + size.y);
+#endif
+    data->IgnoreWindowSizeEventFrame = ImGui::GetFrameCount();
+    glfwSetWindowSize(data->Window, (int)size.x, (int)size.y);
+}
+
+static void ImGui_ImplGlfw_SetWindowTitle(ImGuiViewport* viewport, const char* title)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    glfwSetWindowTitle(data->Window, title);
+}
+
+static void ImGui_ImplGlfw_SetWindowFocus(ImGuiViewport* viewport)
+{
+#if GLFW_HAS_FOCUS_WINDOW
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    glfwFocusWindow(data->Window);
+#else
+    // FIXME: What are the effect of not having this function? At the moment imgui doesn't actually call SetWindowFocus - we set that up ahead, will answer that question later.
+    (void)viewport;
+#endif
+}
+
+static bool ImGui_ImplGlfw_GetWindowFocus(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    return glfwGetWindowAttrib(data->Window, GLFW_FOCUSED) != 0;
+}
+
+static bool ImGui_ImplGlfw_GetWindowMinimized(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    return glfwGetWindowAttrib(data->Window, GLFW_ICONIFIED) != 0;
+}
+
+#if GLFW_HAS_WINDOW_ALPHA
+static void ImGui_ImplGlfw_SetWindowAlpha(ImGuiViewport* viewport, float alpha)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    glfwSetWindowOpacity(data->Window, alpha);
+}
+#endif
+
+static void ImGui_ImplGlfw_RenderWindow(ImGuiViewport* viewport, void*)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    if (g_ClientApi == GlfwClientApi_OpenGL)
+        glfwMakeContextCurrent(data->Window);
+}
+
+static void ImGui_ImplGlfw_SwapBuffers(ImGuiViewport* viewport, void*)
+{
+    ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData;
+    if (g_ClientApi == GlfwClientApi_OpenGL)
+    {
+        glfwMakeContextCurrent(data->Window);
+        glfwSwapBuffers(data->Window);
+    }
+}
+
 
 static bool CheckShader(GLuint handle, const char* desc)
 {
@@ -590,6 +939,181 @@ void    ImGui_ImplCocos2dx_DestroyDeviceObjects()
     ImGui_ImplCocos2dx_DestroyFontsTexture();
 }
 
+
+// FIXME-PLATFORM: GLFW doesn't export monitor work area (see https://github.com/glfw/glfw/pull/989)
+static void ImGui_ImplGlfw_UpdateMonitors()
+{
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    int monitors_count = 0;
+    GLFWmonitor** glfw_monitors = glfwGetMonitors(&monitors_count);
+    platform_io.Monitors.resize(0);
+    for (int n = 0; n < monitors_count; n++)
+    {
+        ImGuiPlatformMonitor monitor;
+        int x, y;
+        glfwGetMonitorPos(glfw_monitors[n], &x, &y);
+        const GLFWvidmode* vid_mode = glfwGetVideoMode(glfw_monitors[n]);
+#if GLFW_HAS_MONITOR_WORK_AREA
+        monitor.MainPos = ImVec2((float)x, (float)y);
+        monitor.MainSize = ImVec2((float)vid_mode->width, (float)vid_mode->height);
+        int w, h;
+        glfwGetMonitorWorkarea(glfw_monitors[n], &x, &y, &w, &h);
+        monitor.WorkPos = ImVec2((float)x, (float)y);;
+        monitor.WorkSize = ImVec2((float)w, (float)h);
+#else
+        monitor.MainPos = monitor.WorkPos = ImVec2((float)x, (float)y);
+        monitor.MainSize = monitor.WorkSize = ImVec2((float)vid_mode->width, (float)vid_mode->height);
+#endif
+#if GLFW_HAS_PER_MONITOR_DPI
+        // Warning: the validity of monitor DPI information on Windows depends on the application DPI awareness settings, which generally needs to be set in the manifest or at runtime.
+        float x_scale, y_scale;
+        glfwGetMonitorContentScale(glfw_monitors[n], &x_scale, &y_scale);
+        monitor.DpiScale = x_scale;
+#endif
+        platform_io.Monitors.push_back(monitor);
+    }
+    g_WantUpdateMonitors = false;
+}
+
+
+static void ImGui_ImplGlfw_WindowCloseCallback(GLFWwindow* window)
+{
+    if (ImGuiViewport* viewport = ImGui::FindViewportByPlatformHandle(window))
+        viewport->PlatformRequestClose = true;
+}
+
+static void ImGui_ImplGlfw_WindowPosCallback(GLFWwindow* window, int, int)
+{
+    if (ImGuiViewport* viewport = ImGui::FindViewportByPlatformHandle(window))
+        viewport->PlatformRequestMove = true;
+}
+
+static void ImGui_ImplGlfw_WindowSizeCallback(GLFWwindow* window, int, int)
+{
+    if (ImGuiViewport* viewport = ImGui::FindViewportByPlatformHandle(window))
+    {
+        if (ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData)
+        {
+            // GLFW may dispatch window size event after calling glfwSetWindowSize().
+            // However depending on the platform the callback may be invoked at different time: on Windows it
+            // appears to be called within the glfwSetWindowSize() call whereas on Linux it is queued and invoked
+            // during glfwPollEvents().
+            // Because the event doesn't always fire on glfwSetWindowSize() we use a frame counter tag to only
+            // ignore recent glfwSetWindowSize() calls.
+            bool ignore_event = (ImGui::GetFrameCount() <= data->IgnoreWindowSizeEventFrame + 1);
+            data->IgnoreWindowSizeEventFrame = -1;
+            if (ignore_event)
+                return;
+        }
+        viewport->PlatformRequestResize = true;
+    }
+}
+
+static void ImGui_ImplGlfw_CreateWindow(ImGuiViewport* viewport)
+{
+    ImGuiViewportDataGlfw* data = IM_NEW(ImGuiViewportDataGlfw)();
+    viewport->PlatformUserData = data;
+
+    // GLFW 3.2 unfortunately always set focus on glfwCreateWindow() if GLFW_VISIBLE is set, regardless of GLFW_FOCUSED
+    // With GLFW 3.3, the hint GLFW_FOCUS_ON_SHOW fixes this problem
+    glfwWindowHint(GLFW_VISIBLE, false);
+    glfwWindowHint(GLFW_FOCUSED, false);
+#if GLFW_HAS_FOCUS_ON_SHOW
+    glfwWindowHint(GLFW_FOCUS_ON_SHOW, false);
+#endif
+    glfwWindowHint(GLFW_DECORATED, (viewport->Flags & ImGuiViewportFlags_NoDecoration) ? false : true);
+#if GLFW_HAS_WINDOW_TOPMOST
+    glfwWindowHint(GLFW_FLOATING, (viewport->Flags & ImGuiViewportFlags_TopMost) ? true : false);
+#endif
+    GLFWwindow* share_window = (g_ClientApi == GlfwClientApi_OpenGL) ? g_Window : NULL;
+    data->Window = glfwCreateWindow((int)viewport->Size.x, (int)viewport->Size.y, "No Title Yet", NULL, share_window);
+    data->WindowOwned = true;
+    viewport->PlatformHandle = (void*)data->Window;
+#ifdef _WIN32
+    viewport->PlatformHandleRaw = glfwGetWin32Window(data->Window);
+#endif
+    glfwSetWindowPos(data->Window, (int)viewport->Pos.x, (int)viewport->Pos.y);
+
+    // Install callbacks for secondary viewports
+    glfwSetMouseButtonCallback(data->Window, ImGui_ImplGlfw_MouseButtonCallback);
+    glfwSetScrollCallback(data->Window, ImGui_ImplGlfw_ScrollCallback);
+    glfwSetKeyCallback(data->Window, ImGui_ImplGlfw_KeyCallback);
+    glfwSetCharCallback(data->Window, ImGui_ImplGlfw_CharCallback);
+    glfwSetWindowCloseCallback(data->Window, ImGui_ImplGlfw_WindowCloseCallback);
+    glfwSetWindowPosCallback(data->Window, ImGui_ImplGlfw_WindowPosCallback);
+    glfwSetWindowSizeCallback(data->Window, ImGui_ImplGlfw_WindowSizeCallback);
+    if (g_ClientApi == GlfwClientApi_OpenGL)
+    {
+        glfwMakeContextCurrent(data->Window);
+        glfwSwapInterval(0);
+    }
+}
+
+
+static void ImGui_ImplGlfw_DestroyWindow(ImGuiViewport* viewport)
+{
+    if (ImGuiViewportDataGlfw* data = (ImGuiViewportDataGlfw*)viewport->PlatformUserData)
+    {
+        if (data->WindowOwned)
+        {
+#if GLFW_HAS_GLFW_HOVERED && defined(_WIN32)
+            HWND hwnd = (HWND)viewport->PlatformHandleRaw;
+            ::RemovePropA(hwnd, "IMGUI_VIEWPORT");
+#endif
+            glfwDestroyWindow(data->Window);
+        }
+        data->Window = NULL;
+        IM_DELETE(data);
+    }
+    viewport->PlatformUserData = viewport->PlatformHandle = NULL;
+}
+
+static void ImGui_ImplGlfw_MonitorCallback(GLFWmonitor*, int)
+{
+    g_WantUpdateMonitors = true;
+}
+
+static void ImGui_ImplCocos2dx_InitPlatformInterface()
+{
+    // Register platform interface (will be coupled with a renderer interface)
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    platform_io.Platform_CreateWindow = ImGui_ImplGlfw_CreateWindow;
+    platform_io.Platform_DestroyWindow = ImGui_ImplGlfw_DestroyWindow;
+    platform_io.Platform_ShowWindow = ImGui_ImplGlfw_ShowWindow;
+    platform_io.Platform_SetWindowPos = ImGui_ImplGlfw_SetWindowPos;
+    platform_io.Platform_GetWindowPos = ImGui_ImplGlfw_GetWindowPos;
+    platform_io.Platform_SetWindowSize = ImGui_ImplGlfw_SetWindowSize;
+    platform_io.Platform_GetWindowSize = ImGui_ImplGlfw_GetWindowSize;
+    platform_io.Platform_SetWindowFocus = ImGui_ImplGlfw_SetWindowFocus;
+    platform_io.Platform_GetWindowFocus = ImGui_ImplGlfw_GetWindowFocus;
+    platform_io.Platform_GetWindowMinimized = ImGui_ImplGlfw_GetWindowMinimized;
+    platform_io.Platform_SetWindowTitle = ImGui_ImplGlfw_SetWindowTitle;
+    platform_io.Platform_RenderWindow = ImGui_ImplGlfw_RenderWindow;
+    platform_io.Platform_SwapBuffers = ImGui_ImplGlfw_SwapBuffers;
+#if GLFW_HAS_WINDOW_ALPHA
+    platform_io.Platform_SetWindowAlpha = ImGui_ImplGlfw_SetWindowAlpha;
+#endif
+#if GLFW_HAS_VULKAN
+    platform_io.Platform_CreateVkSurface = ImGui_ImplGlfw_CreateVkSurface;
+#endif
+#if HAS_WIN32_IME
+    platform_io.Platform_SetImeInputPos = ImGui_ImplWin32_SetImeInputPos;
+#endif
+
+    // Note: monitor callback are broken GLFW 3.2 and earlier (see github.com/glfw/glfw/issues/784)
+    ImGui_ImplGlfw_UpdateMonitors();
+    glfwSetMonitorCallback(ImGui_ImplGlfw_MonitorCallback);
+
+    // Register main window handle (which is owned by the main application, not by us)
+    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    ImGuiViewportDataGlfw* data = IM_NEW(ImGuiViewportDataGlfw)();
+    data->Window = g_Window;
+    data->WindowOwned = false;
+    main_viewport->PlatformUserData = data;
+    main_viewport->PlatformHandle = (void*)g_Window;
+}
+
+
 bool ImGui_ImplCocos2dx_Init(bool install_callbacks)
 {
 #ifdef CC_PLATFORM_PC
@@ -604,11 +1128,21 @@ bool ImGui_ImplCocos2dx_Init(bool install_callbacks)
     // Setup back-end capabilities flags
     ImGuiIO& io = ImGui::GetIO();
 #ifdef CC_PLATFORM_PC
+
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
+
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;           // Enable Docking
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;         // Enable Multi-Viewport / Platform Windows
+    
     io.BackendFlags |= ImGuiBackendFlags_HasMouseCursors;         // We can honor GetMouseCursor() values (optional)
     io.BackendFlags |= ImGuiBackendFlags_HasSetMousePos;          // We can honor io.WantSetMousePos requests (optional, rarely used)
+    io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;    // We can create multi-viewports on the Platform side (optional)
+
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasViewports;    // We can create multi-viewports on the Renderer side (optional)
+
 #endif // CC_PLATFORM_PC
     //io.BackendPlatformName = "imgui_impl_glfw";
-    io.BackendPlatformName = "imgui_impl_opengl3";
+    io.BackendPlatformName = "imgui_impl_opengl2";
     // disable auto load and save
     io.IniFilename = nullptr;
     
@@ -737,6 +1271,17 @@ bool ImGui_ImplCocos2dx_Init(bool install_callbacks)
     };
     cocos2d::Director::getInstance()->getEventDispatcher()->addEventListenerWithFixedPriority(e2, 1);
 #endif // CC_PLATFORM_PC
+
+
+    // Our mouse update function expect PlatformHandle to be filled for the main viewport
+    ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    main_viewport->PlatformHandle = (void*)g_Window;
+#ifdef _WIN32
+    main_viewport->PlatformHandleRaw = glfwGetWin32Window(g_Window);
+#endif
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        ImGui_ImplCocos2dx_InitPlatformInterface();
+
     g_ClientApi = ClientApi_OpenGL;
     return true;
 }
@@ -765,28 +1310,63 @@ static void ImGui_ImplCocos2dx_UpdateMousePosAndButtons()
         io.MouseDown[i] = g_MouseJustPressed[i] || glfwGetMouseButton(g_Window, i) != 0;
         g_MouseJustPressed[i] = false;
     }
-    
+
     // Update mouse position
     const ImVec2 mouse_pos_backup = io.MousePos;
     io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
-#ifdef __EMSCRIPTEN__
-    const bool focused = true; // Emscripten
-#else
-    const bool focused = glfwGetWindowAttrib(g_Window, GLFW_FOCUSED) != 0;
-#endif
-    if (focused)
+    io.MouseHoveredViewport = 0;
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    for (int n = 0; n < platform_io.Viewports.Size; n++)
     {
-        if (io.WantSetMousePos)
+        ImGuiViewport* viewport = platform_io.Viewports[n];
+        GLFWwindow* window = (GLFWwindow*)viewport->PlatformHandle;
+        IM_ASSERT(window != NULL);
+#ifdef __EMSCRIPTEN__
+        const bool focused = true;
+        IM_ASSERT(platform_io.Viewports.Size == 1);
+#else
+        const bool focused = glfwGetWindowAttrib(window, GLFW_FOCUSED) != 0;
+#endif
+        if (focused)
         {
-            glfwSetCursorPos(g_Window, (double)mouse_pos_backup.x, (double)mouse_pos_backup.y);
+            if (io.WantSetMousePos)
+            {
+                glfwSetCursorPos(window, (double)(mouse_pos_backup.x - viewport->Pos.x), (double)(mouse_pos_backup.y - viewport->Pos.y));
+            }
+            else
+            {
+                double mouse_x, mouse_y;
+                glfwGetCursorPos(window, &mouse_x, &mouse_y);
+                if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+                {
+                    // Multi-viewport mode: mouse position in OS absolute coordinates (io.MousePos is (0,0) when the mouse is on the upper-left of the primary monitor)
+                    int window_x, window_y;
+                    glfwGetWindowPos(window, &window_x, &window_y);
+                    io.MousePos = ImVec2((float)mouse_x + window_x, (float)mouse_y + window_y);
+                }
+                else
+                {
+                    // Single viewport mode: mouse position in client window coordinates (io.MousePos is (0,0) when the mouse is on the upper-left corner of the app window)
+                    io.MousePos = ImVec2((float)mouse_x, (float)mouse_y);
+                }
+            }
+            for (int i = 0; i < IM_ARRAYSIZE(io.MouseDown); i++)
+                io.MouseDown[i] |= glfwGetMouseButton(window, i) != 0;
         }
-        else
-        {
-            double mouse_x, mouse_y;
-            glfwGetCursorPos(g_Window, &mouse_x, &mouse_y);
-            io.MousePos = ImVec2((float)mouse_x, (float)mouse_y);
-        }
-    }
+
+        // (Optional) When using multiple viewports: set io.MouseHoveredViewport to the viewport the OS mouse cursor is hovering.
+        // Important: this information is not easy to provide and many high-level windowing library won't be able to provide it correctly, because
+        // - This is _ignoring_ viewports with the ImGuiViewportFlags_NoInputs flag (pass-through windows).
+        // - This is _regardless_ of whether another viewport is focused or being dragged from.
+        // If ImGuiBackendFlags_HasMouseHoveredViewport is not set by the back-end, imgui will ignore this field and infer the information by relying on the
+        // rectangles and last focused time of every viewports it knows about. It will be unaware of other windows that may be sitting between or over your windows.
+        // [GLFW] FIXME: This is currently only correct on Win32. See what we do below with the WM_NCHITTEST, missing an equivalent for other systems.
+        // See https://github.com/glfw/glfw/issues/1236 if you want to help in making this a GLFW feature.
+#if GLFW_HAS_GLFW_HOVERED && defined(_WIN32)
+        if (glfwGetWindowAttrib(window, GLFW_HOVERED) && !(viewport->Flags & ImGuiViewportFlags_NoInputs))
+            io.MouseHoveredViewport = viewport->ID;
+#endif
+                }
 #else
     // Update buttons
     ImGuiIO& io = ImGui::GetIO();
@@ -815,19 +1395,24 @@ static void ImGui_ImplCocos2dx_UpdateMouseCursor()
     ImGuiIO& io = ImGui::GetIO();
     if ((io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) || glfwGetInputMode(g_Window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
         return;
-    
+
     ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
-    if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    for (int n = 0; n < platform_io.Viewports.Size; n++)
     {
-        // Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
-        glfwSetInputMode(g_Window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
-    }
-    else
-    {
-        // Show OS mouse cursor
-        // FIXME-PLATFORM: Unfocused windows seems to fail changing the mouse cursor with GLFW 3.2, but 3.3 works here.
-        glfwSetCursor(g_Window, g_MouseCursors[imgui_cursor] ? g_MouseCursors[imgui_cursor] : g_MouseCursors[ImGuiMouseCursor_Arrow]);
-        glfwSetInputMode(g_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        GLFWwindow* window = (GLFWwindow*)platform_io.Viewports[n]->PlatformHandle;
+        if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
+        {
+            // Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+        }
+        else
+        {
+            // Show OS mouse cursor
+            // FIXME-PLATFORM: Unfocused windows seems to fail changing the mouse cursor with GLFW 3.2, but 3.3 works here.
+            glfwSetCursor(window, g_MouseCursors[imgui_cursor] ? g_MouseCursors[imgui_cursor] : g_MouseCursors[ImGuiMouseCursor_Arrow]);
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
     }
 #endif // CC_PLATFORM_PC
 }
@@ -897,7 +1482,9 @@ void ImGui_ImplCocos2dx_NewFrame()
     io.DisplaySize = ImVec2((float)w, (float)h);
     if (w > 0 && h > 0)
         io.DisplayFramebufferScale = ImVec2((float)buffer_w / w, (float)buffer_h / h);
-    
+    if (g_WantUpdateMonitors)
+        ImGui_ImplGlfw_UpdateMonitors();
+
     // Setup time step
     const auto deltaTime = cocos2d::Director::getInstance()->getDeltaTime();
     io.DeltaTime = deltaTime > 0 ? deltaTime : (float)(1.0f / 60.0f);
@@ -907,6 +1494,111 @@ void ImGui_ImplCocos2dx_NewFrame()
     
     // Update game controllers (if enabled and available)
     ImGui_ImplCocos2dx_UpdateGamepads();
-    
-    ImGui::NewFrame();
+}
+
+
+
+// Forward Declarations
+static void ImGui_ImplOpenGL2_InitPlatformInterface();
+static void ImGui_ImplOpenGL2_ShutdownPlatformInterface();
+
+// Functions
+bool    ImGui_ImplOpenGL2_Init()
+{
+    // Setup back-end capabilities flags
+    ImGuiIO& io = ImGui::GetIO();
+    io.BackendRendererName = "imgui_impl_opengl2";
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasViewports;    // We can create multi-viewports on the Renderer side (optional)
+
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        ImGui_ImplOpenGL2_InitPlatformInterface();
+    return true;
+}
+
+void    ImGui_ImplOpenGL2_Shutdown()
+{
+    ImGui_ImplOpenGL2_ShutdownPlatformInterface();
+    ImGui_ImplOpenGL2_DestroyDeviceObjects();
+}
+
+void    ImGui_ImplOpenGL2_NewFrame()
+{
+    if (!g_FontTexture)
+        ImGui_ImplOpenGL2_CreateDeviceObjects();
+}
+
+bool ImGui_ImplOpenGL2_CreateFontsTexture()
+{
+    // Build texture atlas
+    ImGuiIO& io = ImGui::GetIO();
+    unsigned char* pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);   // Load as RGBA 32-bit (75% of the memory is wasted, but default font is so small) because it is more likely to be compatible with user's existing shaders. If your ImTextureId represent a higher-level concept than just a GL texture id, consider calling GetTexDataAsAlpha8() instead to save on GPU memory.
+
+    // Upload texture to graphics system
+    GLint last_texture;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+    glGenTextures(1, &g_FontTexture);
+    glBindTexture(GL_TEXTURE_2D, g_FontTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+    // Store our identifier
+    io.Fonts->TexID = (ImTextureID)(intptr_t)g_FontTexture;
+
+    // Restore state
+    glBindTexture(GL_TEXTURE_2D, last_texture);
+
+    return true;
+}
+
+void ImGui_ImplOpenGL2_DestroyFontsTexture()
+{
+    if (g_FontTexture)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        glDeleteTextures(1, &g_FontTexture);
+        io.Fonts->TexID = 0;
+        g_FontTexture = 0;
+    }
+}
+
+bool    ImGui_ImplOpenGL2_CreateDeviceObjects()
+{
+    return ImGui_ImplOpenGL2_CreateFontsTexture();
+}
+
+void    ImGui_ImplOpenGL2_DestroyDeviceObjects()
+{
+    ImGui_ImplOpenGL2_DestroyFontsTexture();
+}
+
+//--------------------------------------------------------------------------------------------------------
+// MULTI-VIEWPORT / PLATFORM INTERFACE SUPPORT
+// This is an _advanced_ and _optional_ feature, allowing the back-end to create and handle multiple viewports simultaneously.
+// If you are new to dear imgui or creating a new binding for dear imgui, it is recommended that you completely ignore this section first..
+//--------------------------------------------------------------------------------------------------------
+
+static void ImGui_ImplOpenGL2_RenderWindow(ImGuiViewport* viewport, void*)
+{
+    if (!(viewport->Flags & ImGuiViewportFlags_NoRendererClear))
+    {
+        ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    ImGui_ImplOpenGL2_RenderDrawData(viewport->DrawData);
+}
+
+static void ImGui_ImplOpenGL2_InitPlatformInterface()
+{
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    platform_io.Renderer_RenderWindow = ImGui_ImplOpenGL2_RenderWindow;
+}
+
+static void ImGui_ImplOpenGL2_ShutdownPlatformInterface()
+{
+    ImGui::DestroyPlatformWindows();
 }

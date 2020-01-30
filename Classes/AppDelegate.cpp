@@ -2,8 +2,8 @@
 #include "HelloWorldScene.h"
 
 #include "platform/CCGLView.h"
-#include "imgui/CCImGuiLayer.h"
-#include "imgui/CCIMGUI.h"
+#include "ccimgui/CCImGuiLayer.h"
+#include "ccimgui/CCIMGUI.h"
 
 USING_NS_CC;
 //

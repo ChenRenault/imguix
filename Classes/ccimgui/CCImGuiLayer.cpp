@@ -1,5 +1,5 @@
 #include "CCImGuiLayer.h"
-#include "imgui.h"
+#include "imgui/imgui.h"
 #include "imgui_impl_cocos2dx.h"
 #include "CCIMGUI.h"
 
@@ -75,10 +75,13 @@ void ImGuiLayer::visit(cocos2d::Renderer *renderer, const cocos2d::Mat4 &parentT
 
 void ImGuiLayer::onDraw()
 {
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
     getGLProgram()->use();
 
     // create frame
+    ImGui_ImplOpenGL2_NewFrame();
     ImGui_ImplCocos2dx_NewFrame();
+    ImGui::NewFrame();
     
     // draw all gui
     CCIMGUI::getInstance()->updateImGUI();
@@ -88,5 +91,17 @@ void ImGuiLayer::onDraw()
     
     ImGui::Render();
     
-    ImGui_ImplCocos2dx_RenderDrawData(ImGui::GetDrawData());
+    //ImGui_ImplCocos2dx_RenderDrawData(ImGui::GetDrawData());
+    ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+
+    // Update and Render additional Platform Windows
+    // (Platform functions may change the current OpenGL context, so we save/restore it to make it easier to paste this code elsewhere.
+    //  For this specific demo app we could also call glfwMakeContextCurrent(window) directly)
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+    {
+        GLFWwindow* backup_current_context = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backup_current_context);
+    }
 }

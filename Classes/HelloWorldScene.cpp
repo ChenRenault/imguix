@@ -1,5 +1,5 @@
 #include "HelloWorldScene.h"
-#include "imgui/CCIMGUI.h"
+#include "ccimgui/CCIMGUI.h"
 
 #include "spine/spine.h"
 USING_NS_CC;
