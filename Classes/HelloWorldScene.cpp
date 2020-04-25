@@ -1,12 +1,15 @@
 #include "HelloWorldScene.h"
+
+#include "ccimgui/imgui/imgui.h"
+#include "ccimgui/imgui/imgui_internal.h"
 #include "ccimgui/CCIMGUI.h"
 
 #include "spine/spine.h"
 USING_NS_CC;
 using namespace spine;
 
-static bool show_test_window = true;
-static bool show_another_window = false;
+static bool show_test_window = false;
+static bool show_another_window = true;
 static ImVec4 clear_color = ImColor(114, 144, 154);
 
 HelloWorld::~HelloWorld()
@@ -56,6 +59,42 @@ bool HelloWorld::init()
     Director::getInstance()->getEventDispatcher()->addEventListenerWithSceneGraphPriority(listener, rootNode);
     
     CCIMGUI::getInstance()->addImGUI([=](){
+
+        static ImGuiDockNodeFlags opt_flags = ImGuiDockNodeFlags_NoWindowMenuButton | ImGuiDockNodeFlags_NoCloseButton;
+
+        if (ImGui::DockBuilderGetNode(ImGui::GetID("MyDockspace")) == nullptr)
+        {
+            ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+            ImGui::DockBuilderRemoveNode(dockspace_id);
+            ImGui::DockBuilderAddNode(dockspace_id);
+            ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetIO().DisplaySize);
+
+            ImGuiID dock_main_id = dockspace_id;
+            ImGuiID dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.2f, nullptr, &dock_main_id);
+            ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.2f, nullptr, &dock_main_id);
+            ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.3f, nullptr, &dock_main_id);
+            ImGuiID dock_id_middle = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.8f, nullptr, &dock_main_id);
+
+            ImGui::DockBuilderDockWindow("###scene", dock_id_middle);
+            ImGui::DockBuilderDockWindow("###inspector", dock_id_right);
+            ImGui::DockBuilderDockWindow("###hierarchy", dock_id_left);
+            ImGui::DockBuilderDockWindow("###console", dock_id_bottom);
+            ImGui::DockBuilderDockWindow("###profiler", dock_id_bottom);
+            ImGui::DockBuilderDockWindow("Dear ImGui Demo", dock_id_left);
+            ImGui::DockBuilderDockWindow("GraphicsInfo", dock_id_left);
+            ImGui::DockBuilderDockWindow("ApplicationInfo", dock_id_left);
+            ImGui::DockBuilderFinish(dockspace_id);
+        }
+
+        // Dockspace
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
+        {
+            ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+            //ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), opt_flags);
+        }
+
+
         // 1. Show a simple window
         // Tip: if we don't call ImGui::Begin()/ImGui::End() the widgets appears in a window automatically called "Debug"
         {
@@ -71,9 +110,25 @@ bool HelloWorld::init()
         // 2. Show another simple window, this time using an explicit Begin/End pair
         if (show_another_window)
         {
-            ImGui::SetNextWindowSize(ImVec2(200,100), ImGuiCond_FirstUseEver);
-            ImGui::Begin("Another Window", &show_another_window);
+            ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+            ImGui::SetNextWindowSize(ImVec2(200, 100), ImGuiCond_FirstUseEver);
+            ImGui::Begin("Another Window###hierarchy", &show_another_window);
             
+            ImGui::Text("Hello");
+            ImGui::End();
+
+            ImGui::Begin("Scene###scene", &show_another_window);
+
+            ImGui::Text("Hello");
+            ImGui::End();
+
+
+            ImGui::Begin("Inspector###inspector", &show_another_window);
+
+            ImGui::Text("Hello");
+            ImGui::End();
+            ImGui::Begin("Console###console", &show_another_window);
+
             ImGui::Text("Hello");
             ImGui::End();
         }

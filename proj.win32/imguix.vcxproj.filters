@@ -16,6 +16,9 @@
     <Filter Include="src\ccimgui\imgui">
       <UniqueIdentifier>{97990868-f450-4071-8002-c5dc05015c73}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\ImGuizmo">
+      <UniqueIdentifier>{e662571b-244d-4ddf-bb9f-9fac192aadcb}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -47,6 +50,18 @@
     </ClCompile>
     <ClCompile Include="..\Classes\ccimgui\imgui_impl_cocos2dx.cpp">
       <Filter>src\ccimgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Classes\ImGuizmo\ImCurveEdit.cpp">
+      <Filter>src\ImGuizmo</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Classes\ImGuizmo\ImGradient.cpp">
+      <Filter>src\ImGuizmo</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Classes\ImGuizmo\ImGuizmo.cpp">
+      <Filter>src\ImGuizmo</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Classes\ImGuizmo\ImSequencer.cpp">
+      <Filter>src\ImGuizmo</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -86,10 +101,30 @@
     <ClInclude Include="..\Classes\ccimgui\imgui_impl_cocos2dx.h">
       <Filter>src\ccimgui</Filter>
     </ClInclude>
+    <ClInclude Include="..\Classes\ImGuizmo\ImCurveEdit.h">
+      <Filter>src\ImGuizmo</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Classes\ImGuizmo\ImGradient.h">
+      <Filter>src\ImGuizmo</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Classes\ImGuizmo\ImGuizmo.h">
+      <Filter>src\ImGuizmo</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Classes\ImGuizmo\ImSequencer.h">
+      <Filter>src\ImGuizmo</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="game.rc">
       <Filter>resource</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Classes\ImGuizmo\LICENSE">
+      <Filter>src\ImGuizmo</Filter>
+    </None>
+    <None Include="..\Classes\ImGuizmo\README.md">
+      <Filter>src\ImGuizmo</Filter>
+    </None>
   </ItemGroup>
 </Project>

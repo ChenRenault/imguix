@@ -160,6 +160,10 @@ xcopy "$(ProjectDir)..\Resources" "$(OutDir)\Resources\" /D /E /I /F /Y
     <ClCompile Include="..\Classes\ccimgui\CCIMGUI.cpp" />
     <ClCompile Include="..\Classes\ccimgui\CCImGuiLayer.cpp" />
     <ClCompile Include="..\Classes\ccimgui\imgui_impl_cocos2dx.cpp" />
+    <ClCompile Include="..\Classes\ImGuizmo\ImCurveEdit.cpp" />
+    <ClCompile Include="..\Classes\ImGuizmo\ImGradient.cpp" />
+    <ClCompile Include="..\Classes\ImGuizmo\ImGuizmo.cpp" />
+    <ClCompile Include="..\Classes\ImGuizmo\ImSequencer.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -174,6 +178,10 @@ xcopy "$(ProjectDir)..\Resources" "$(OutDir)\Resources\" /D /E /I /F /Y
     <ClInclude Include="..\Classes\ccimgui\CCIMGUI.h" />
     <ClInclude Include="..\Classes\ccimgui\CCImGuiLayer.h" />
     <ClInclude Include="..\Classes\ccimgui\imgui_impl_cocos2dx.h" />
+    <ClInclude Include="..\Classes\ImGuizmo\ImCurveEdit.h" />
+    <ClInclude Include="..\Classes\ImGuizmo\ImGradient.h" />
+    <ClInclude Include="..\Classes\ImGuizmo\ImGuizmo.h" />
+    <ClInclude Include="..\Classes\ImGuizmo\ImSequencer.h" />
     <ClInclude Include="main.h" />
   </ItemGroup>
   <ItemGroup>
@@ -187,6 +195,10 @@ xcopy "$(ProjectDir)..\Resources" "$(OutDir)\Resources\" /D /E /I /F /Y
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="game.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Classes\ImGuizmo\LICENSE" />
+    <None Include="..\Classes\ImGuizmo\README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
